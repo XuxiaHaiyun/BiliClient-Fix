@@ -83,7 +83,7 @@ cd BiliClient
 
 <div align="center">
 
-[![Star History Chart](https://api.star-history.com/svg?repos=huanli233/BiliClient&type=Date)](https://star-history.com/#huanli233/BiliClient&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=huanli233/BiliClient&type=Date)](https://star-history.com/#XuxiaHaiyun/BiliClient-Fix&Date)
 
 </div>
 
