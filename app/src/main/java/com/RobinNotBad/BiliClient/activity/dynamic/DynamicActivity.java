@@ -16,7 +16,6 @@ import com.RobinNotBad.BiliClient.activity.base.RefreshMainActivity;
 import com.RobinNotBad.BiliClient.adapter.dynamic.DynamicAdapter;
 import com.RobinNotBad.BiliClient.adapter.dynamic.DynamicHolder;
 import com.RobinNotBad.BiliClient.api.DynamicApi;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 import com.RobinNotBad.BiliClient.model.Dynamic;
 import com.RobinNotBad.BiliClient.util.CenterThreadPool;
 import com.RobinNotBad.BiliClient.util.MsgUtil;
@@ -165,8 +164,6 @@ public class DynamicActivity extends RefreshMainActivity {
         setOnLoadMoreListener(page -> addDynamic(type));
 
         setPageName("动态");
-
-        TutorialHelper.showTutorialList(this, R.array.tutorial_dynamic, 6);
 
         refreshDynamic();
     }

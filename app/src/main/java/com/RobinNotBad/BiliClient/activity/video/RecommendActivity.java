@@ -8,7 +8,6 @@ import com.RobinNotBad.BiliClient.R;
 import com.RobinNotBad.BiliClient.activity.base.RefreshMainActivity;
 import com.RobinNotBad.BiliClient.adapter.video.VideoCardAdapter;
 import com.RobinNotBad.BiliClient.api.RecommendApi;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 import com.RobinNotBad.BiliClient.model.VideoCard;
 import com.RobinNotBad.BiliClient.util.CenterThreadPool;
 
@@ -37,8 +36,6 @@ public class RecommendActivity extends RefreshMainActivity {
         setPageName("推荐");
 
         recyclerView.setHasFixedSize(true);
-
-        TutorialHelper.showTutorialList(this, R.array.tutorial_recommend, 0);
 
         refreshRecommend();
     }

@@ -16,7 +16,6 @@ import com.RobinNotBad.BiliClient.activity.reply.ReplyFragment;
 import com.RobinNotBad.BiliClient.adapter.viewpager.ViewPagerFragmentAdapter;
 import com.RobinNotBad.BiliClient.api.ReplyApi;
 import com.RobinNotBad.BiliClient.event.ReplyEvent;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 import com.RobinNotBad.BiliClient.util.AnimationUtils;
 import com.RobinNotBad.BiliClient.util.MsgUtil;
 import com.RobinNotBad.BiliClient.util.TerminalContext;
@@ -48,7 +47,6 @@ public class DynamicInfoActivity extends BaseActivity {
         TextView pageName = findViewById(R.id.pageName);
         pageName.setText("动态详情");
 
-        TutorialHelper.showTutorialList(this, R.array.tutorial_dynamic_info, 6);
         TerminalContext.getInstance().getDynamicById(id)
                 .observe(this, (dynamicResult) -> dynamicResult.onSuccess((dynamic) -> {
                     List<Fragment> fragmentList = new ArrayList<>();
@@ -72,7 +70,6 @@ public class DynamicInfoActivity extends BaseActivity {
                         scrollView.setFocusableInTouchMode(true);
                         scrollView.requestFocus();
                     });
-                    TutorialHelper.showPagerTutorial(this, 2);
                 }).onFailure((e) -> {
                     MsgUtil.err(e);
                     ((ImageView) findViewById(R.id.loading)).setImageResource(R.mipmap.loading_2233_error);

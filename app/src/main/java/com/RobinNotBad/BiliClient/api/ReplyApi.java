@@ -87,32 +87,72 @@ public class ReplyApi {
 
 
     /**
-     * 获取评论列表（/x/v2/reply/wbi/main）
+     * 获取评论列表（对齐 PiliPlus 最新风控对策）
+     * <p>
+     * 登录态：走旧版分页接口 /x/v2/reply（pn/ps 分页，无需 wbi，登录 cookie 不触发风控）；
+     * /x/v2/reply/wbi/main 已被风控，不再使用。
+     * <p>
+     * 未登录：走 /x/v2/reply/main（offset 游标分页），且请求头不带 Cookie（对齐 PiliPlus 的 NoAccount 策略）。
      *
      * @param oid        评论区oid
-     * @param rpid       指定要寻找的评论的rpid
-     * @param pagination 页
+     * @param rpid       指定要寻找的评论的rpid（仅未登录分支支持定位）
+     * @param pagination 游标：登录态为下一页页码字符串，未登录为 main 接口的 next_offset
      * @param type       评论区类型
-     * @param sort       排序方式
+     * @param sort       排序方式（2=按时间，3=按热度）
      * @return 返回码（0=继续加载，1=到底了，-1=错误）与下一页的pagination
      */
     @NonNull
     public static Pair<Integer, String> getRepliesLazy(long oid, long rpid, String pagination, int type, int sort, List<Reply> replyArrayList) throws JSONException, IOException {
 
+        boolean isLogin = SharedPreferencesUtil.getLong(SharedPreferencesUtil.mid, 0) != 0;
+
+        if (isLogin) {
+            // 登录态：旧版分页接口，pagination 字段复用为页码
+            int pn = 1;
+            if (!TextUtils.isEmpty(pagination)) {
+                try {
+                    pn = Integer.parseInt(pagination.trim());
+                } catch (NumberFormatException ignored) {
+                    pn = 1;
+                }
+            }
+            // 旧接口 sort: 0=按时间，1=按热度
+            int apiSort = (sort == 2) ? 0 : 1;
+            String url = "https://api.bilibili.com/x/v2/reply?pn=" + pn
+                    + "&type=" + type + "&oid=" + oid + "&sort=" + apiSort + "&ps=20";
+
+            JSONObject all = NetWorkUtil.getJson(url);
+            if (all.getInt("code") == 0 && !all.isNull("data")) {
+                JSONObject data = all.getJSONObject("data");
+                if (!data.isNull("replies") && data.getJSONArray("replies").length() > 0) {
+                    if (rpid <= 0 && pn == 1 && data.has("top_replies") && !data.isNull("top_replies"))
+                        analyzeReplyArray(true, data.getJSONArray("top_replies"), replyArrayList);
+                    analyzeReplyArray(true, data.getJSONArray("replies"), replyArrayList);
+                    return new Pair<>(0, String.valueOf(pn + 1));
+                }
+                return new Pair<>(1, "");
+            }
+            return new Pair<>(-1, "");
+        }
+
+        // 未登录：/x/v2/reply/main，无 Cookie 请求头
+        String paginationStr = new JSONObject()
+                .put("offset", TextUtils.isEmpty(pagination) ? "" : pagination)
+                .toString();
+
         NetWorkUtil.FormData reqData = new NetWorkUtil.FormData()
                 .setUrlParam(true)
-                .put("type", type)
                 .put("oid", oid)
-                .put("plat", 1)
-                .put("web_location", "1315875")
-                .put("mode", sort);
-        reqData.put("pagination_str", new JSONObject().put("offset", TextUtils.isEmpty(pagination) ? "" : pagination));
+                .put("type", type)
+                .put("mode", sort) // 2=按时间，3=按热度
+                .put("pagination_str", paginationStr);
         if (rpid > 0) reqData.put("seek_rpid", rpid);
-        String url = "https://api.bilibili.com/x/v2/reply/wbi/main" + reqData;
+
+        String url = "https://api.bilibili.com/x/v2/reply/main" + reqData;
 
         //Log.e("debug-评论区链接", url);
 
-        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(url));
+        JSONObject all = NetWorkUtil.getJson(url, NetWorkUtil.webHeadersNoCookie());
 
         //Log.e("debug-评论区",all.toString());
 
@@ -148,9 +188,14 @@ public class ReplyApi {
 
     public static Pair<Integer, Reply> sendReply(long oid, long root, long parent, String text, int type) throws IOException, JSONException {
         String url = "https://api.bilibili.com/x/v2/reply/add";
-        String arg = "oid=" + oid + "&type=" + type + (root == 0 ? "" : ("&root=" + root + "&parent=" + parent))
-                + "&message=" + text + "&jsonp=jsonp&csrf=" + SharedPreferencesUtil.getString("csrf", "");
-        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, arg, NetWorkUtil.webHeaders).body()).string());
+        NetWorkUtil.FormData form = new NetWorkUtil.FormData()
+                .put("oid", oid)
+                .put("type", type)
+                .put("message", text)
+                .put("jsonp", "jsonp")
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""));
+        if (root != 0) form.put("root", root).put("parent", parent);
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, form.toString(), NetWorkUtil.webHeaders).body()).string());
         Log.e("debug-发送评论", result.toString());
         JSONObject reply = null;
         if (result.has("data") && !result.isNull("data") && result.getJSONObject("data").has("reply") && !result.getJSONObject("data").isNull("reply")) {
@@ -168,11 +213,91 @@ public class ReplyApi {
     }
 
     public static int likeReply(long oid, long root, boolean action) throws IOException, JSONException {
+        return likeReply(oid, root, action, REPLY_TYPE_VIDEO);
+    }
+
+    /**
+     * 评论点赞/取消
+     *
+     * @param type 评论区类型（不能写死为视频，动态/专栏等评论区类型不同）
+     */
+    public static int likeReply(long oid, long root, boolean action, int type) throws IOException, JSONException {
         String url = "https://api.bilibili.com/x/v2/reply/action";
-        String arg = "oid=" + oid + "&type=1&rpid=" + root + "&action=" + (action ? "1" : "0") + "&jsonp=jsonp&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        String arg = new NetWorkUtil.FormData()
+                .put("oid", oid)
+                .put("type", type)
+                .put("rpid", root)
+                .put("action", action ? 1 : 0)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
         JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, arg, NetWorkUtil.webHeaders).body()).string());
         Log.e("debug-点赞评论", result.toString());
         return result.getInt("code");
+    }
+
+    /**
+     * 评论点踩/取消
+     *
+     * @param action 1=点踩，0=取消
+     */
+    public static int hateReply(long oid, long root, int action, int type) throws IOException, JSONException {
+        String url = "https://api.bilibili.com/x/v2/reply/hate";
+        String arg = new NetWorkUtil.FormData()
+                .put("oid", oid)
+                .put("type", type)
+                .put("rpid", root)
+                .put("action", action)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, arg, NetWorkUtil.webHeaders).body()).string());
+        return result.getInt("code");
+    }
+
+    /**
+     * 置顶/取消置顶评论（仅UP主）
+     *
+     * @param isUpTop true=取消置顶
+     */
+    public static int replyTop(long oid, long rpid, int type, boolean isUpTop) throws IOException, JSONException {
+        String url = "https://api.bilibili.com/x/v2/reply/top";
+        String arg = new NetWorkUtil.FormData()
+                .put("oid", oid)
+                .put("type", type)
+                .put("rpid", rpid)
+                .put("action", isUpTop ? 0 : 1)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, arg, NetWorkUtil.webHeaders).body()).string());
+        return result.getInt("code");
+    }
+
+    /**
+     * 举报评论
+     */
+    public static int report(long oid, long rpid, int reasonType, boolean banUid) throws IOException, JSONException {
+        String url = "https://api.bilibili.com/x/v2/reply/report";
+        String arg = new NetWorkUtil.FormData()
+                .put("oid", oid)
+                .put("type", REPLY_TYPE_VIDEO)
+                .put("rpid", rpid)
+                .put("reason", reasonType)
+                .put("add_blacklist", banUid)
+                .put("gaia_source", "main_h5")
+                .put("platform", "android")
+                .put("scene", "main")
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, arg, NetWorkUtil.webHeaders).body()).string());
+        return result.getInt("code");
+    }
+
+    /**
+     * 评论区交互数据（点赞/投币/收藏入口）
+     */
+    public static JSONObject replyInteraction(long oid, int type) throws IOException, JSONException {
+        String url = "https://api.bilibili.com/x/v2/reply/wbi/transfer?oid=" + oid
+                + "&type=" + type + "&web_location=333.1369";
+        return NetWorkUtil.getJson(url);
     }
 
     /**

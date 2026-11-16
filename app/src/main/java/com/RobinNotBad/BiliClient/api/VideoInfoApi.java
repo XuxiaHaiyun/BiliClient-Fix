@@ -28,18 +28,18 @@ import java.util.List;
 
 public class VideoInfoApi {
     public static VideoInfo getVideoInfo(String bvid) throws IOException, JSONException {  //通过bvid获取json
-        String url = "https://api.bilibili.com/x/web-interface/view?bvid=" + bvid;
+        String url = ConfInfoApi.signWBI("https://api.bilibili.com/x/web-interface/wbi/view?bvid=" + bvid);
         JSONObject result = NetWorkUtil.getJson(url);
-        if (!result.has("data")) return null;
+        if (result.optInt("code", -1) != 0 || result.isNull("data")) return null;
         VideoInfo videoInfo = getInfoByJson(result.getJSONObject("data"));
         LikeCoinFavApi.getVideoStats(videoInfo);
         return videoInfo;
     }
 
     public static VideoInfo getVideoInfo(long aid) throws IOException, JSONException {  //通过aid获取json
-        String url = "https://api.bilibili.com/x/web-interface/view?aid=" + aid;
+        String url = ConfInfoApi.signWBI("https://api.bilibili.com/x/web-interface/wbi/view?aid=" + aid);
         JSONObject result = NetWorkUtil.getJson(url);
-        if (!result.has("data")) return null;
+        if (result.optInt("code", -1) != 0 || result.isNull("data")) return null;
         VideoInfo videoInfo = getInfoByJson(result.getJSONObject("data"));
         LikeCoinFavApi.getVideoStats(videoInfo);
         return videoInfo;
@@ -47,15 +47,21 @@ public class VideoInfoApi {
 
 
     public static String getTags(String bvid) throws IOException, JSONException {  //通过bvid获取tag
-        String url = "https://api.bilibili.com/x/tag/archive/tags?bvid=" + bvid;
-        JSONObject result = NetWorkUtil.getJson(url);
-        return analyzeTags(result.getJSONArray("data"));
+        String url = ConfInfoApi.signWBI("https://api.bilibili.com/x/web-interface/view/detail?bvid=" + bvid);
+        return analyzeTagsFromDetail(NetWorkUtil.getJson(url));
     }
 
     public static String getTags(long aid) throws IOException, JSONException {  //通过aid获取tag
-        String url = "https://api.bilibili.com/x/tag/archive/tags?aid=" + aid;
-        JSONObject result = NetWorkUtil.getJson(url);
-        return analyzeTags(result.getJSONArray("data"));
+        String url = ConfInfoApi.signWBI("https://api.bilibili.com/x/web-interface/view/detail?aid=" + aid);
+        return analyzeTagsFromDetail(NetWorkUtil.getJson(url));
+    }
+
+    // 旧的 /x/tag/archive/tags 已下线，改用 view/detail 返回的 Tags 字段
+    private static String analyzeTagsFromDetail(JSONObject result) throws JSONException {
+        if (result.optInt("code", -1) != 0 || result.isNull("data")) return "";
+        JSONObject data = result.getJSONObject("data");
+        if (data.isNull("Tags")) return "";
+        return analyzeTags(data.getJSONArray("Tags"));
     }
 
     public static String analyzeTags(JSONArray tagJson) throws JSONException {

@@ -27,7 +27,6 @@ import com.RobinNotBad.BiliClient.activity.base.InstanceActivity;
 import com.RobinNotBad.BiliClient.adapter.SearchHistoryAdapter;
 import com.RobinNotBad.BiliClient.adapter.SearchSuggestionsAdapter;
 import com.RobinNotBad.BiliClient.api.SearchApi;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 import com.RobinNotBad.BiliClient.ui.widget.recycler.CustomLinearManager;
 import com.RobinNotBad.BiliClient.util.JsonUtil;
 import com.RobinNotBad.BiliClient.util.LinkUrlUtil;
@@ -61,9 +60,6 @@ public class SearchActivity extends InstanceActivity {
     private String defaultSearchContent;
     private boolean defaultSearchContentEnabled;
 
-    boolean tutorial_show;
-    String classname;
-
     String[] specialList = {"心理疾病", "自杀", "自尽", "自残", "抑郁", "双相", "安眠药"};
 
     @SuppressLint({"MissingInflatedId", "NotifyDataSetChanged", "InflateParams"})
@@ -71,13 +67,8 @@ public class SearchActivity extends InstanceActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        classname = getClass().getSimpleName();
-        tutorial_show = SharedPreferencesUtil.getBoolean("tutorial_pager_" + classname, true);
-
         asyncInflate(R.layout.activity_search, (layoutView, resId) -> {
             Log.e("debug", "进入搜索页");
-
-            TutorialHelper.showTutorialList(this, R.array.tutorial_search, 4);
 
             handler = new Handler();
 
@@ -153,11 +144,6 @@ public class SearchActivity extends InstanceActivity {
                 public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
                     if (position != 0) {
                         onScrolled(256); // 让搜索框隐藏
-                        if (tutorial_show) {
-                            tutorial_show = false;
-                            findViewById(R.id.text_tutorial_pager).setVisibility(View.GONE);
-                            SharedPreferencesUtil.putBoolean("tutorial_pager_" + classname, false);
-                        }
                     }
 
                     Fragment fragmentCurr = getSupportFragmentManager()
@@ -384,14 +370,6 @@ public class SearchActivity extends InstanceActivity {
                     report(e);
                 }
                 refreshing = false;
-
-                if (tutorial_show) {
-                    runOnUiThread(() -> {
-                        TextView textView = findViewById(R.id.text_tutorial_pager);
-                        textView.setVisibility(View.VISIBLE);
-                        textView.setText(getString(R.string.tutorial_pager, 4));
-                    });
-                }
             }
         }
     }

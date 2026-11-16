@@ -12,16 +12,20 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URLEncoder;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.zip.Inflater;
@@ -47,15 +51,127 @@ public class NetWorkUtil {
     private static final AtomicReference<OkHttpClient> INSTANCE = new AtomicReference<>();
 
     public static class Inet4Selector implements Dns {
+        private static final ExecutorService DNS_EXECUTOR = Executors.newCachedThreadPool();
+        private static final String[] FALLBACK_DNS = {"223.5.5.5", "119.29.29.29", "114.114.114.114"};
+
         @NonNull
         @Override
         public List<InetAddress> lookup(@NonNull String hostname) throws UnknownHostException {
-            List<InetAddress> hosts = Dns.SYSTEM.lookup(hostname);
+            List<InetAddress> hosts = systemLookup(hostname);
             List<InetAddress> inet4Hosts = new ArrayList<>();
-            for (InetAddress host : hosts) {
-                if (host.getAddress().length == 4) inet4Hosts.add(host);
+            if (hosts != null) {
+                for (InetAddress host : hosts) {
+                    if (host.getAddress().length == 4) inet4Hosts.add(host);
+                }
             }
-            return inet4Hosts;    //筛选IPV4地址，IPV6请求有异常
+            Logu.e("dns", hostname + " system=" + hosts + " ipv4=" + inet4Hosts);
+            if (!inet4Hosts.isEmpty()) return inet4Hosts;    //筛选IPV4地址，IPV6请求有异常
+
+            // 系统解析失败或超时（部分路由器/运营商 DNS 对个别域名会返回 NODATA 或长时间无响应），
+            // 直接向公共 DNS 发起 A 记录查询兜底，避免分享短链等场景直接失败。
+            for (String server : FALLBACK_DNS) {
+                List<InetAddress> fallback = resolveByUdpDns(hostname, server);
+                if (fallback != null && !fallback.isEmpty()) {
+                    Logu.e("dns-fallback", hostname + " -> " + fallback + " via " + server);
+                    return fallback;
+                }
+            }
+            if (hosts != null && !hosts.isEmpty()) return hosts;
+            throw new UnknownHostException("Unable to resolve host \"" + hostname + "\"");
+        }
+
+        private static List<InetAddress> systemLookup(String hostname) {
+            Future<List<InetAddress>> future = DNS_EXECUTOR.submit(() -> Dns.SYSTEM.lookup(hostname));
+            try {
+                return future.get(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                future.cancel(true);
+                Logu.e("dns-timeout", hostname + " : " + e);
+                return null;
+            }
+        }
+
+        /**
+         * 极简 DNS A 记录查询（UDP）。仅用于系统解析不可用时的兜底。
+         */
+        private static List<InetAddress> resolveByUdpDns(String hostname, String dnsServer) {
+            DatagramSocket socket = null;
+            try {
+                byte[] query = buildDnsQuery(hostname);
+                socket = new DatagramSocket();
+                socket.setSoTimeout(4000);
+                socket.send(new DatagramPacket(query, query.length, InetAddress.getByName(dnsServer), 53));
+
+                byte[] buffer = new byte[1024];
+                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                socket.receive(packet);
+
+                return parseDnsResponse(packet.getData(), packet.getLength());
+            } catch (Exception e) {
+                return null;
+            } finally {
+                if (socket != null) socket.close();
+            }
+        }
+
+        private static byte[] buildDnsQuery(String hostname) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            out.write(0x12);
+            out.write(0x34);   // ID
+            out.write(0x01);
+            out.write(0x00);   // Flags: 标准查询 + 递归
+            out.write(0x00);
+            out.write(0x01);   // QDCOUNT
+            out.write(0x00);
+            out.write(0x00);   // ANCOUNT
+            out.write(0x00);
+            out.write(0x00);   // NSCOUNT
+            out.write(0x00);
+            out.write(0x00);   // ARCOUNT
+            for (String label : hostname.split("\\.")) {
+                byte[] bytes = label.getBytes();
+                out.write(bytes.length);
+                out.write(bytes, 0, bytes.length);
+            }
+            out.write(0x00);   // QNAME 结束
+            out.write(0x00);
+            out.write(0x01);   // QTYPE A
+            out.write(0x00);
+            out.write(0x01);   // QCLASS IN
+            return out.toByteArray();
+        }
+
+        private static List<InetAddress> parseDnsResponse(byte[] data, int length) throws UnknownHostException {
+            if (length < 12) return null;
+            int qdCount = ((data[4] & 0xFF) << 8) | (data[5] & 0xFF);
+            int anCount = ((data[6] & 0xFF) << 8) | (data[7] & 0xFF);
+            int offset = 12;
+            for (int i = 0; i < qdCount; i++) {
+                offset = skipName(data, offset);
+                offset += 4;
+            }
+            List<InetAddress> result = new ArrayList<>();
+            for (int i = 0; i < anCount && offset + 10 <= length; i++) {
+                offset = skipName(data, offset);
+                int type = ((data[offset] & 0xFF) << 8) | (data[offset + 1] & 0xFF);
+                int rdLength = ((data[offset + 8] & 0xFF) << 8) | (data[offset + 9] & 0xFF);
+                offset += 10;
+                if (type == 1 && rdLength == 4 && offset + 4 <= length) {
+                    result.add(InetAddress.getByAddress(new byte[]{data[offset], data[offset + 1], data[offset + 2], data[offset + 3]}));
+                }
+                offset += rdLength;
+            }
+            return result;
+        }
+
+        private static int skipName(byte[] data, int offset) {
+            while (offset < data.length) {
+                int len = data[offset] & 0xFF;
+                if (len == 0) return offset + 1;
+                if ((len & 0xC0) == 0xC0) return offset + 2;
+                offset += len + 1;
+            }
+            return offset;
         }
     }
 
@@ -73,6 +189,8 @@ public class NetWorkUtil {
                             isSslRedirect = location != null && !request.isHttps() && new URI(location).getScheme().equalsIgnoreCase("https") && request.url().host().equalsIgnoreCase(new URI(location).getHost());
                         } catch (URISyntaxException ignored) {
                         }
+
+                        Logu.e("redirect-check", "host=" + request.url().host() + " code=" + response.code() + " isRedirect=" + response.isRedirect() + " location=" + location + " handler=" + (request.tag(RedirectHandler.class) != null) + " isSslRedirect=" + isSslRedirect);
 
                         if (response.isRedirect() && location != null) {
                             if (request.url().host().equals("b23.tv") && !isSslRedirect && (handler = request.tag(RedirectHandler.class)) != null) {
@@ -133,13 +251,14 @@ public class NetWorkUtil {
         final int maxRetries = 3;
         
         while (retryCount < maxRetries) {
-            try (ResponseBody body = get(url, headers).body()) {
+            Response response = get(url, headers);
+            try (ResponseBody body = response.body()) {
                 if (body != null) {
                     String responseText = body.string();
                     
                     // 检查是否是HTML页面
                     if (responseText.trim().startsWith("<!DOCTYPE") || responseText.trim().startsWith("<html")) {
-                        Logu.e("收到HTML页面而不是JSON数据，重试 " + (retryCount + 1) + "/" + maxRetries + ": " + url);
+                        Logu.e("收到HTML页面而不是JSON数据，重试 " + (retryCount + 1) + "/" + maxRetries + " code=" + response.code() + " head=" + response.headers().toString() + " body=" + responseText.substring(0, Math.min(300, responseText.length())) + " : " + url);
                         retryCount++;
                         if (retryCount < maxRetries) {
                             Thread.sleep(1000); // 等待1秒后重试
@@ -356,13 +475,33 @@ public class NetWorkUtil {
         return "";
     }
 
+    /**
+     * 读取存储的 Cookie 并规范化为合法请求头。
+     * 历史版本可能写入尾部多余的 "; "，会让 B 站风控直接返回 412，这里统一清理。
+     */
+    public static String getCookieString() {
+        String cookies = SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, "");
+        if (cookies == null) return "";
+        StringBuilder sb = new StringBuilder();
+        for (String part : cookies.split(";")) {
+            String item = part.trim();
+            if (item.isEmpty()) continue;
+            if (sb.length() > 0) sb.append("; ");
+            sb.append(item);
+        }
+        return sb.toString();
+    }
+
     private static void saveCookiesFromResponse(Response response) {
         List<String> newCookies = response.headers("Set-Cookie");
 
         //如果没有新cookies，直接返回
         if (newCookies.isEmpty()) return;
         String cookiesStr = SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, "");
-        ArrayList<String> oldCookies = (cookiesStr.equals("") ? new ArrayList<>() : new ArrayList<>(Arrays.asList(cookiesStr.split("; "))));  //转list
+        ArrayList<String> oldCookies = new ArrayList<>();  //转list
+        for (String item : cookiesStr.split("; ")) {
+            if (!item.trim().isEmpty()) oldCookies.add(item.trim());
+        }
 
         for (String newCookie : newCookies) {  //对每一条新cookie遍历
 
@@ -444,9 +583,10 @@ public class NetWorkUtil {
     }
 
     public static final String USER_AGENT_WEB = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.95 Safari/537.36";
+    public static final String USER_AGENT_APP = "Mozilla/5.0 BiliDroid/8.43.0 (bbcallen@gmail.com) os/android model/android mobi_app/android build/8430300 channel/master innerVer/8430300 osVer/15 network/2";
     public static final ArrayList<String> webHeaders = new ArrayList<>() {{
         add("Cookie");
-        add(SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, ""));
+        add(getCookieString());
 
         add("Origin");
         add("https://www.bilibili.com");
@@ -467,8 +607,73 @@ public class NetWorkUtil {
         add("?0");
     }};
 
+    // 部分接口（如用户空间稿件）对来源页校验严格，使用APP端UA与标头可避免未登录时的风控
+    public static final ArrayList<String> appHeaders = new ArrayList<>() {{
+        add("Cookie");
+        add(getCookieString());
+
+        add("User-Agent");
+        add(USER_AGENT_APP);
+
+        add("bili-http-engine");
+        add("cronet");
+
+        add("env");
+        add("prod");
+
+        add("app-key");
+        add("android64");
+
+        add("x-bili-aurora-zone");
+        add("sh001");
+    }};
+
     public static void refreshHeaders() {
-        webHeaders.set(1, SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, ""));
+        webHeaders.set(1, getCookieString());
+        appHeaders.set(1, getCookieString());
+    }
+
+    /**
+     * 复制一份 webHeaders 并移除 Cookie。
+     * 部分接口（如未登录拉评论 /x/v2/reply/main）带 Cookie 反而会触发风控，
+     * PiliPlus 对未登录评论请求显式置空 cookie，这里保持一致。
+     */
+    public static ArrayList<String> webHeadersNoCookie() {
+        ArrayList<String> headers = new ArrayList<>(webHeaders);
+        for (int i = headers.size() - 2; i >= 0; i -= 2) {
+            if (headers.get(i).equalsIgnoreCase("Cookie")) {
+                headers.remove(i + 1);
+                headers.remove(i);
+            }
+        }
+        return headers;
+    }
+
+    /**
+     * 复制一份 webHeaders 并替换 Referer，用于少数对来源页有要求的接口（如搜索）。
+     */
+    public static ArrayList<String> webHeadersWithReferer(String referer) {
+        ArrayList<String> headers = new ArrayList<>(webHeaders);
+        for (int i = 0; i + 1 < headers.size(); i += 2) {
+            if (headers.get(i).equalsIgnoreCase("Referer")) {
+                headers.set(i + 1, referer);
+                break;
+            }
+        }
+        return headers;
+    }
+
+    /**
+     * 复制一份 webHeaders 并替换 Referer 与 Origin，用于搜索等对来源页有严格要求的接口。
+     */
+    public static ArrayList<String> webHeadersWithRefererAndOrigin(String referer, String origin) {
+        ArrayList<String> headers = new ArrayList<>(webHeaders);
+        for (int i = 0; i + 1 < headers.size(); i += 2) {
+            String key = headers.get(i);
+            if (key.equalsIgnoreCase("Referer")) headers.set(i + 1, referer);
+            else if (key.equalsIgnoreCase("Origin")) headers.set(i + 1, origin);
+        }
+        return headers;
     }
 
     public static class FormData {

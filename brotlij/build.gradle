@@ -5,6 +5,7 @@ group = 'com.netease.hearttouch'
 
 android {
     compileSdk 33
+    buildToolsVersion '35.0.0'
     
     defaultConfig {
         versionCode 3

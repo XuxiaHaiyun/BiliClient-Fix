@@ -94,6 +94,18 @@ public class QRLoginFragment extends Fragment {
             if (isAdded()) requireActivity().finish();
         });
 
+        MaterialCardView passwordLogin = view.findViewById(R.id.passwordLogin);
+        passwordLogin.setOnClickListener(v -> {
+            if (isAdded() && requireActivity() instanceof LoginActivity)
+                ((LoginActivity) requireActivity()).switchToPasswordLogin(false);
+        });
+
+        MaterialCardView smsLogin = view.findViewById(R.id.smsLogin);
+        smsLogin.setOnClickListener(v -> {
+            if (isAdded() && requireActivity() instanceof LoginActivity)
+                ((LoginActivity) requireActivity()).switchToPasswordLogin(true);
+        });
+
         qrImageView.setOnClickListener(v -> {
             if (need_refresh) {
                 qrImageView.setImageResource(R.mipmap.loading_qr);

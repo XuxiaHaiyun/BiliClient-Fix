@@ -15,7 +15,6 @@ import com.RobinNotBad.BiliClient.activity.dynamic.DynamicInfoActivity;
 import com.RobinNotBad.BiliClient.activity.reply.ReplyFragment;
 import com.RobinNotBad.BiliClient.adapter.viewpager.ViewPagerFragmentAdapter;
 import com.RobinNotBad.BiliClient.event.ReplyEvent;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 import com.RobinNotBad.BiliClient.model.Opus;
 import com.RobinNotBad.BiliClient.util.AnimationUtils;
 import com.RobinNotBad.BiliClient.util.MsgUtil;
@@ -47,8 +46,6 @@ public class OpusInfoActivity extends BaseActivity {
         setPageName("文章详情");
         loadingView = findViewById(R.id.loading);
 
-        //TutorialHelper.showTutorialList(this, R.array.tutorial_article, 7);
-
         ViewPager viewPager = findViewById(R.id.viewPager);
 
 
@@ -77,7 +74,6 @@ public class OpusInfoActivity extends BaseActivity {
                     if (seek_reply != -1) viewPager.setCurrentItem(1);
 
                     AnimationUtils.crossFade(loadingView, oiFragment.getView());
-                    TutorialHelper.showPagerTutorial(this, 2);
                 }).onFailure((error) -> {
                     loadingView.setImageResource(R.mipmap.loading_2233_error);
                     MsgUtil.err(error);

@@ -120,6 +120,16 @@ import tv.danmaku.ijk.media.player.IjkMediaPlayer;
 public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPreparedListener {
     private boolean destroyed = false;
 
+    // ===== 播放器稳定性修复（借鉴 PiliPlus 的硬解有序回退 + 生命周期二次检查） =====
+    // 硬解探测看门狗：进入播放页若要用硬解，先同步落盘标记；首帧成功渲染后清除。
+    // 若下次启动发现标记仍在，说明上次崩在硬解解码器初始化阶段(ijk so 的 SIGILL)，
+    // 自动降级为软解，避免进入播放页即反复崩溃。
+    private static final String PREF_HWDEC_PROBE = "player_hwdec_probe";
+
+    // 播放器代次：每次 release/new 自增。所有异步回调(setDisplay 定时器、线程池、
+    // postDelayed 等)捕获当时的代次，执行前校验，防止旧播放器被延迟回调操作而崩溃。
+    private int playerGeneration = 0;
+
     private IjkMediaPlayer ijkPlayer;
     private IDanmakuView mDanmakuView;
     private DanmakuContext mContext;
@@ -308,9 +318,22 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
             initMediaSession();
         }
 
+        // 硬解看门狗：若上次以硬解进入播放页却没有走到首帧渲染就异常退出，
+        // 探针会残留，说明硬解路径不稳定（ijk so 在 onSelectCodec 处 SIGILL）。
+        // 这里自动降级为软件解码并清除探针，避免再次进入播放页即崩溃。
+        try {
+            if (SharedPreferencesUtil.getBoolean(PREF_HWDEC_PROBE, false)) {
+                SharedPreferencesUtil.putBoolean("player_codec", false);
+                SharedPreferencesUtil.putBoolean(PREF_HWDEC_PROBE, false);
+                Logu.e("ijk-hwdec", "上次硬解播放未正常渲染首帧，已自动降级为软件解码");
+            }
+        } catch (Throwable ignored) {
+        }
+
         IjkMediaPlayer.loadLibrariesOnce(null);
 
         ijkPlayer = new IjkMediaPlayer();
+        playerGeneration++;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             batteryManager = (BatteryManager) getSystemService(BATTERY_SERVICE);
@@ -684,6 +707,10 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
         Logu.v("创建播放器");
         Logu.v("url", video_url);
 
+        // 捕获本次播放器代次；下面的异步定时器回调执行前校验，
+        // 若播放器已被 release/new（切换分P、清晰度、听视频等），旧回调直接作废。
+        final int myGeneration = playerGeneration;
+
         runOnUiThread(() -> loading_text0.setText("初始化播放"));
 
         if (isAudioOnlyMode) {
@@ -691,9 +718,18 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
             ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_frame", 48); // 跳过所有视频帧
             ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 48);
         } else {
-            ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec",
-                    (SharedPreferencesUtil.getBoolean("player_codec", true) ? 1 : 0));
+            // 默认软解（player_codec 默认 false）。硬解为可选，且受看门狗保护。
+            boolean useHwDec = SharedPreferencesUtil.getBoolean("player_codec", false);
+            ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", useHwDec ? 1 : 0);
             ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 48);
+            if (useHwDec) {
+                // 以硬解 prepare 前同步落盘探针；若解码器初始化阶段 SIGILL 崩溃，
+                // 进程来不及清标记，下次启动看门狗据此自动降级软解。
+                try {
+                    SharedPreferencesUtil.putBoolean(PREF_HWDEC_PROBE, true);
+                } catch (Throwable ignored) {
+                }
+            }
         }
 
         ijkPlayer.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles",
@@ -726,6 +762,10 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                 @Override
                 public void run() {
                     Logu.v("循环检测");
+                    if (myGeneration != playerGeneration || destroyed) {
+                        this.cancel();
+                        return;
+                    }
                     if (mSurfaceTexture != null) {
                         this.cancel();
                         Surface surface = new Surface(mSurfaceTexture);
@@ -744,6 +784,10 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                 @Override
                 public void run() {
                     Logu.v("循环检测");
+                    if (myGeneration != playerGeneration || destroyed) {
+                        this.cancel();
+                        return;
+                    }
                     if (!surfaceHolder.isCreating()) {
                         this.cancel();
                         Logu.v("定时器结束！");
@@ -752,7 +796,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                         surfaceHolder.addCallback(new SurfaceHolder.Callback() {
                             @Override
                             public void surfaceCreated(@NonNull SurfaceHolder surfaceHolder) {
-                                if (!destroyed) {
+                                if (myGeneration == playerGeneration && !destroyed && ijkPlayer != null) {
                                     Logu.v("surface", "重新设置Holder");
                                     ijkPlayer.setDisplay(surfaceHolder);
                                     if (isPrepared) {
@@ -768,7 +812,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                             @Override
                             public void surfaceDestroyed(@NonNull SurfaceHolder surfaceHolder) {
                                 Logu.v("surface", "Holder没了");
-                                if (isPrepared && !destroyed)
+                                if (myGeneration == playerGeneration && isPrepared && !destroyed && ijkPlayer != null)
                                     ijkPlayer.setDisplay(null);
                             }
                         });
@@ -792,7 +836,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
             if (isOnlineVideo) {
                 Map<String, String> headers = new HashMap<>();
                 headers.put("Referer", "https://www.bilibili.com/");
-                headers.put("Cookie", SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, ""));
+                headers.put("Cookie", NetWorkUtil.getCookieString());
                 ijkPlayer.setDataSource(nowurl, headers);
             } else
                 ijkPlayer.setDataSource(nowurl);
@@ -848,6 +892,13 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
 
         if (isOnlineVideo || isLiveMode)
             ijkPlayer.setOnInfoListener((mp, what, extra) -> {
+                // 首帧成功渲染 = 解码器（含硬解）初始化通过，清除硬解探针。
+                if (what == IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) {
+                    try {
+                        SharedPreferencesUtil.putBoolean(PREF_HWDEC_PROBE, false);
+                    } catch (Throwable ignored) {
+                    }
+                }
                 if (what == IMediaPlayer.MEDIA_INFO_BUFFERING_START) {
                     runOnUiThread(() -> {
                         loading_info.setVisibility(View.VISIBLE);
@@ -881,6 +932,15 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
     @SuppressLint("SetTextI18n")
     @Override
     public void onPrepared(IMediaPlayer mediaPlayer) {
+        // 只处理当前播放器回调：旧的、已被 release 的播放器若延迟回调 prepared，
+        // 直接释放它本身并返回，避免误操作新播放器（native 竞态防护）。
+        if (mediaPlayer != ijkPlayer) {
+            try {
+                mediaPlayer.release();
+            } catch (Throwable ignored) {
+            }
+            return;
+        }
         if (destroyed) {
             ijkPlayer.release();
             return;
@@ -1726,7 +1786,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                 ArrayList<String> mHeaders = new ArrayList<>() {
                     {
                         add("Cookie");
-                        add(SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, ""));
+                        add(NetWorkUtil.getCookieString());
                         add("Referer");
                         add("https://live.bilibili.com/" + aid);
                         add("Origin");
@@ -1746,7 +1806,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                 okHttpClient = new OkHttpClient();
                 Request request = new Request.Builder()
                         .url(url)
-                        .header("Cookie", SharedPreferencesUtil.getString(SharedPreferencesUtil.cookies, ""))
+                        .header("Cookie", NetWorkUtil.getCookieString())
                         .header("Origin", "https://live.bilibili.com")
                         .header("User-Agent", USER_AGENT_WEB)
                         .build();
@@ -2147,6 +2207,8 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                         if (ijkPlayer != null) {
                             ijkPlayer.stop();
                             ijkPlayer.release();
+                            ijkPlayer = null;
+                            playerGeneration++; // 旧播放器的异步回调全部作废
                         }
 
                         loading_info.setVisibility(View.VISIBLE);
@@ -2162,7 +2224,9 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     Thread.sleep(100);
 
                     runOnUiThread(() -> {
+                        if (destroyed) return;
                         ijkPlayer = new IjkMediaPlayer();
+                        playerGeneration++;
                         progress_history = currentPosition;
 
                         setDisplay();
@@ -2360,6 +2424,8 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     if (ijkPlayer != null) {
                         ijkPlayer.stop();
                         ijkPlayer.release();
+                        ijkPlayer = null;
+                        playerGeneration++; // 旧播放器异步回调作废
                     }
                     if (mDanmakuView != null) {
                         mDanmakuView.release();
@@ -2404,6 +2470,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     }
 
                     ijkPlayer = new IjkMediaPlayer();
+                    playerGeneration++;
                     mDanmakuView = findViewById(R.id.sv_danmaku);
 
                     setDisplay();
@@ -2520,6 +2587,8 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     if (ijkPlayer != null) {
                         ijkPlayer.stop();
                         ijkPlayer.release();
+                        ijkPlayer = null;
+                        playerGeneration++; // 旧播放器异步回调作废
                     }
 
                     video_url = playerData.videoUrl;
@@ -2537,6 +2606,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     isPlaying = false;
 
                     ijkPlayer = new IjkMediaPlayer();
+                    playerGeneration++;
                     progress_history = currentPosition;
 
                     setDisplay();
@@ -2899,6 +2969,8 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     if (ijkPlayer != null) {
                         ijkPlayer.stop();
                         ijkPlayer.release();
+                        ijkPlayer = null;
+                        playerGeneration++; // 旧播放器异步回调作废
                     }
                     if (mDanmakuView != null) {
                         mDanmakuView.release();
@@ -2943,6 +3015,7 @@ public class PlayerActivity extends Activity implements IjkMediaPlayer.OnPrepare
                     }
                     
                     ijkPlayer = new IjkMediaPlayer();
+                    playerGeneration++;
                     mDanmakuView = findViewById(R.id.sv_danmaku);
                     
                     setDisplay();

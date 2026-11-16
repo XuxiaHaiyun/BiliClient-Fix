@@ -1,8 +1,5 @@
 package com.RobinNotBad.BiliClient.helper;
 
-import android.app.Activity;
-import android.content.Context;
-import android.content.Intent;
 import android.content.res.XmlResourceParser;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -12,19 +9,9 @@ import android.text.style.ForegroundColorSpan;
 import android.text.style.StrikethroughSpan;
 import android.text.style.StyleSpan;
 import android.text.style.UnderlineSpan;
-import android.util.Log;
-import android.view.View;
-import android.widget.TextView;
-import android.widget.Toast;
 
-import androidx.viewpager.widget.ViewPager;
-
-import com.RobinNotBad.BiliClient.R;
-import com.RobinNotBad.BiliClient.activity.TutorialActivity;
 import com.RobinNotBad.BiliClient.model.CustomText;
 import com.RobinNotBad.BiliClient.model.Tutorial;
-import com.RobinNotBad.BiliClient.util.MsgUtil;
-import com.RobinNotBad.BiliClient.util.SharedPreferencesUtil;
 
 import org.xmlpull.v1.XmlPullParser;
 
@@ -178,80 +165,5 @@ public class TutorialHelper {
         }
         return str;
     }
-
-
-    /**
-     * 加载对应的教程，并且检查是否浏览过该教程
-     *
-     * @param xml_res_id       教程XML的ID
-     * @param context
-     * @param tutorial_tag     教程的Key，是保存浏览进度时使用的键值
-     * @param tutorial_version 教程版本，用于保存浏览进度（大于0）
-     */
-    public static void show(int xml_res_id, Context context, String tutorial_tag, int tutorial_version) {
-        if (SharedPreferencesUtil.getInt("tutorial_ver_" + tutorial_tag, -1) < tutorial_version) {
-            if (SharedPreferencesUtil.getInt("tutorial_ver_" + tutorial_tag, 0) != 0)
-                Toast.makeText(context.getApplicationContext(), "教程已更新", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(context, TutorialActivity.class);
-            intent.putExtra("xml_id", xml_res_id);
-            intent.putExtra("tag", tutorial_tag);
-            intent.putExtra("version", tutorial_version);
-            context.startActivity(intent);
-        }
-    }
-
-
-    /**
-     * 用于直接通过Array加载对应页面的所有教程，避免新功能的教程与之前的写在同一个教程内时用户不看的情况
-     *
-     * @param context
-     * @param array_id     教程Array的ID
-     * @param tutorial_key 教程的Key值，是保存浏览进度时使用的键值，在string.xml中存储
-     */
-    public static void showTutorialList(Context context, int array_id, int tutorial_key) {
-        try {
-            int n = context.getResources().getStringArray(array_id).length; //用于修复version错误
-            for (int i = 1; i <= context.getResources().getStringArray(array_id).length; i++) {
-                int indentify = context.getResources().getIdentifier(context.getPackageName() + ":" + context.getResources().getStringArray(array_id)[i - 1], null, null);
-                if (indentify > 0)
-                    show(indentify, context, context.getResources().getStringArray(R.array.tutorial_list)[tutorial_key], n--);
-            }
-        } catch (Exception e) {
-            MsgUtil.showMsg("加载教程时遇到问题");
-            e.printStackTrace();
-        }
-    }
-
-    public static void showPagerTutorial(Activity activity, int pagecount) {
-        activity.runOnUiThread(() -> {
-            String pagename = activity.getClass().getSimpleName();
-            TextView textView = activity.findViewById(R.id.text_tutorial_pager);
-            if (SharedPreferencesUtil.getBoolean("tutorial_pager_" + pagename, true)) {
-                Log.d("debug-tutorial", pagename);
-                textView.setVisibility(View.VISIBLE);
-                textView.setText(activity.getString(R.string.tutorial_pager, pagecount));
-
-                View viewPager = activity.findViewById(R.id.viewPager);
-                if (viewPager instanceof ViewPager) {
-                    ((ViewPager) viewPager).addOnPageChangeListener(new ViewPager.OnPageChangeListener() {
-                        @Override
-                        public void onPageScrolled(int position, float positionOffset, int positionOffsetPixels) {
-                            if (position != 0) textView.setVisibility(View.GONE);
-                        }
-
-                        @Override
-                        public void onPageSelected(int position) {
-                        }
-
-                        @Override
-                        public void onPageScrollStateChanged(int state) {
-                        }
-                    });
-                }
-                SharedPreferencesUtil.putBoolean("tutorial_pager_" + pagename, false);
-            } else {
-                textView.setVisibility(View.GONE);
-            }
-        });
-    }
 }
+

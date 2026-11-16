@@ -22,6 +22,7 @@ public class PlayerData implements Parcelable {
     public long aid;
     public long cid;
     public long mid;
+    public long epid = -1; // 番剧ep id，用于pgc播放流解析
     public int progress = 0;
     public long cidHistory = 0;
     public int type = 0;
@@ -49,6 +50,7 @@ public class PlayerData implements Parcelable {
         aid = in.readLong();
         cid = in.readLong();
         mid = in.readLong();
+        epid = in.readLong();
         progress = in.readInt();
         type = in.readInt();
         timeStamp = in.readLong();
@@ -88,6 +90,7 @@ public class PlayerData implements Parcelable {
         dest.writeLong(aid);
         dest.writeLong(cid);
         dest.writeLong(mid);
+        dest.writeLong(epid);
         dest.writeInt(progress);
         dest.writeInt(type);
         dest.writeLong(timeStamp);

@@ -9,6 +9,7 @@ android {
     namespace 'com.RobinNotBad.BiliClient'
     //noinspection GradleDependency
     compileSdk 33
+    buildToolsVersion '35.0.0'
 
     sourceSets {
         main{

@@ -3,6 +3,7 @@ package com.RobinNotBad.BiliClient.api;
 import com.RobinNotBad.BiliClient.model.ArticleCard;
 import com.RobinNotBad.BiliClient.model.UserInfo;
 import com.RobinNotBad.BiliClient.model.VideoCard;
+import com.RobinNotBad.BiliClient.util.Logu;
 import com.RobinNotBad.BiliClient.util.NetWorkUtil;
 import com.RobinNotBad.BiliClient.util.StringUtil;
 
@@ -24,23 +25,35 @@ public class SearchApi {
     public static String seid = "";
     public static String search_keyword = "";
 
+    private static final int WEB_LOCATION = 1430654;
+
     public static JSONArray search(String keyword, int page) throws IOException, JSONException {
         if (!search_keyword.equals(keyword)) {
             search_keyword = keyword;
             seid = "";
         }
 
-        String url = "https://api.bilibili.com/x/web-interface/wbi/search/all/v2?";
-        url += "page=" + page +
-                "&keyword=" + URLEncoder.encode(search_keyword, "UTF-8") + "&seid=" + seid;
+        String url = "https://api.bilibili.com/x/web-interface/wbi/search/all/v2";
+        url += new NetWorkUtil.FormData().setUrlParam(true)
+                .put("page", page)
+                .put("keyword", search_keyword)
+                .put("seid", seid)
+                .put("page_size", 20)
+                .put("platform", "pc")
+                .put("web_location", WEB_LOCATION);
 
-        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(url)); // 得到一整个json
+        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(url), searchHeaders("all")); // 得到一整个json
 
         if (all.isNull("data"))
             return null;
         JSONObject data = all.getJSONObject("data"); // 搜索列表中的data项又是一个json，把它提出来
 
-        seid = data.getString("seid");
+        if (data.has("v_voucher")) {
+            Logu.w("搜索触发风控(v_voucher)");
+            return null;
+        }
+
+        seid = data.optString("seid", seid);
 
         if (data.has("result") && !data.isNull("result"))
             return data.getJSONArray("result"); // 其实这还不是我们要的结果，下面的函数对它进行再次拆解 这里做了判空
@@ -54,22 +67,42 @@ public class SearchApi {
             seid = "";
         }
 
-        String url = "https://api.bilibili.com/x/web-interface/wbi/search/type?";
-        url += "page=" + page +
-                "&keyword=" + URLEncoder.encode(search_keyword, "UTF-8") + "&search_type=" + type + "&seid=" + seid;
+        String url = "https://api.bilibili.com/x/web-interface/wbi/search/type";
+        url += new NetWorkUtil.FormData().setUrlParam(true)
+                .put("page", page)
+                .put("keyword", search_keyword)
+                .put("search_type", type)
+                .put("seid", seid)
+                .put("page_size", 20)
+                .put("platform", "pc")
+                .put("web_location", WEB_LOCATION);
 
-        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(url)); // 得到一整个json
+        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(url), searchHeaders(type)); // 得到一整个json
 
         if (all.isNull("data"))
             return null;
         JSONObject data = all.getJSONObject("data"); // 搜索列表中的data项又是一个json，把它提出来
 
-        seid = data.getString("seid");
+        if (data.has("v_voucher")) {
+            Logu.w("搜索触发风控(v_voucher)");
+            return null;
+        }
+
+        seid = data.optString("seid", seid);
 
         if (data.has("result") && !data.isNull("result"))
             return data.get("result"); // 其实这还不是我们要的结果，下面的函数对它进行再次拆解 这里做了判空
         else
             return null;
+    }
+
+    /**
+     * 搜索接口对来源页有要求，构造带 search.bilibili.com Referer/Origin 的请求头。
+     */
+    private static ArrayList<String> searchHeaders(String type) {
+        String keyword = android.net.Uri.encode(search_keyword == null ? "" : search_keyword);
+        String referer = "https://search.bilibili.com/" + type + "?keyword=" + keyword;
+        return NetWorkUtil.webHeadersWithRefererAndOrigin(referer, "https://search.bilibili.com");
     }
 
     public static void getVideosFromSearchResult(JSONArray input, ArrayList<VideoCard> videoCardList, boolean first)
@@ -168,18 +201,28 @@ public class SearchApi {
             return suggestions;
         }
 
-        String url = "https://s.search.bilibili.com/main/suggest?term=" + URLEncoder.encode(keyword, "UTF-8");
+        String url = "https://api.bilibili.com/x/web-interface/suggest";
+        url += new NetWorkUtil.FormData().setUrlParam(true)
+                .put("term", keyword)
+                .put("highlight", 0)
+                .put("spmid", "333.1365")
+                .put("web_location", "333.1365");
 
-        JSONObject response = NetWorkUtil.getJson(url);
+        JSONObject response = NetWorkUtil.getJson(ConfInfoApi.signWBI(url),
+                NetWorkUtil.webHeadersWithRefererAndOrigin("https://www.bilibili.com/", "https://www.bilibili.com"));
 
-        if (response.getInt("code") == 0 && response.has("result")) {
-            JSONObject result = response.getJSONObject("result");
-            if (result.has("tag") && !result.isNull("tag")) {
+        if (response.optInt("code", -1) == 0 && response.has("data") && !response.isNull("data")) {
+            JSONObject data = response.getJSONObject("data");
+            JSONObject result = data.optJSONObject("result");
+            if (result != null && result.has("tag") && !result.isNull("tag")) {
                 JSONArray tagArray = result.getJSONArray("tag");
                 for (int i = 0; i < tagArray.length(); i++) {
                     JSONObject tagObj = tagArray.getJSONObject(i);
-                    String value = tagObj.getString("value");
-                    suggestions.add(value);
+                    String value = tagObj.optString("value", "");
+                    if (value.isEmpty()) value = tagObj.optString("term", "");
+                    if (value.isEmpty()) value = tagObj.optString("name", "");
+                    value = StringUtil.htmlToString(value);
+                    if (!value.isEmpty()) suggestions.add(value);
                 }
             }
         }

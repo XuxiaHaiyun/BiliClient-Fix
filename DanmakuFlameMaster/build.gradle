@@ -20,6 +20,7 @@ def SourcePath = 'src/main/'
 
 android {
     compileSdkVersion 33
+    buildToolsVersion '35.0.0'
 
     buildTypes {
         release {

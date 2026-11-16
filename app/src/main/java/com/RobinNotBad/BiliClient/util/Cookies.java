@@ -44,7 +44,10 @@ public class Cookies {
     public String toString() {
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, String> entry : cookieMap.entrySet()) {
-            sb.append(entry.getKey()).append("=").append(entry.getValue()).append("; ");
+            if (sb.length() > 0) {
+                sb.append("; ");
+            }
+            sb.append(entry.getKey()).append("=").append(entry.getValue());
         }
         return sb.toString();
     }

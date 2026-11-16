@@ -26,34 +26,31 @@ public class FavoriteApi {
     // TODO 合集收藏
 
     public static ArrayList<FavoriteFolder> getFavoriteFolders(long mid) throws IOException, JSONException {
-        String url = "https://space.bilibili.com/ajax/fav/getBoxList?mid=" + mid;
+        // 旧接口 space.bilibili.com/ajax/fav/getBoxList 已下线，改用 v3 接口
+        String url = "https://api.bilibili.com/x/v3/fav/folder/created/list-all"
+                + new NetWorkUtil.FormData()
+                .setUrlParam(true)
+                .put("up_mid", mid)
+                .put("type", 2);
         JSONObject result = NetWorkUtil.getJson(url);
-        JSONObject data = result.getJSONObject("data");
         ArrayList<FavoriteFolder> folderList = new ArrayList<>();
-        if (data.has("list") && !data.isNull("list")) {
-            JSONArray list = data.getJSONArray("list");
-            for (int i = 0; i < list.length(); i++) {
-                JSONObject folder = list.getJSONObject(i);
+        JSONObject data = result.optJSONObject("data");
+        if (data == null) return folderList;
+        JSONArray list = data.optJSONArray("list");
+        if (list == null) return folderList;
 
-                FavoriteFolder favoriteFolder = new FavoriteFolder();
+        for (int i = 0; i < list.length(); i++) {
+            JSONObject folder = list.getJSONObject(i);
 
-                favoriteFolder.id = folder.getLong("fav_box");
-                favoriteFolder.name = folder.getString("name");
+            FavoriteFolder favoriteFolder = new FavoriteFolder();
 
-                if (!folder.isNull("videos"))
-                    favoriteFolder.cover = folder.getJSONArray("videos").getJSONObject(0).getString("pic");
-                else favoriteFolder.cover = "";
+            favoriteFolder.id = folder.optLong("id", folder.optLong("fid", 0));
+            favoriteFolder.name = folder.optString("title", "");
+            favoriteFolder.cover = folder.optString("cover", "");
+            favoriteFolder.videoCount = folder.optInt("media_count", 0);
+            favoriteFolder.maxCount = folder.optInt("max_count", 1000);
 
-                favoriteFolder.videoCount = folder.getInt("count");
-                favoriteFolder.maxCount = folder.getInt("max_count");
-                Log.e("debug-收藏夹ID", String.valueOf(favoriteFolder.id));
-                Log.e("debug-收藏夹名称", favoriteFolder.name);
-                Log.e("debug-收藏夹封面", favoriteFolder.cover);
-                Log.e("debug-收藏夹视频数量", String.valueOf(favoriteFolder.videoCount));
-                Log.e("debug-收藏夹视频上限", String.valueOf(favoriteFolder.maxCount));
-                Log.e("debug-收藏夹", "----------------");
-                folderList.add(favoriteFolder);
-            }
+            folderList.add(favoriteFolder);
         }
         return folderList;
     }
@@ -97,29 +94,45 @@ public class FavoriteApi {
     }
 
     public static int getFolderVideos(long mid, long fid, int page, ArrayList<VideoCard> videoList) throws IOException, JSONException {
-        String url = "https://api.bilibili.com/x/space/fav/arc?vmid=" + mid
-                + "&ps=30&fid=" + fid + "&tid=0&keyword=&pn=" + page + "&order=fav_time";
+        // 旧接口 /x/space/fav/arc 已下线，改用 v3 收藏夹资源列表
+        String url = "https://api.bilibili.com/x/v3/fav/resource/list" + new NetWorkUtil.FormData()
+                .setUrlParam(true)
+                .put("media_id", fid)
+                .put("pn", page)
+                .put("ps", 30)
+                .put("keyword", "")
+                .put("order", "mtime")
+                .put("type", 0)
+                .put("tid", 0)
+                .put("platform", "web");
         JSONObject result = NetWorkUtil.getJson(url);
-        JSONObject data = result.getJSONObject("data");
-        if (data.has("archives") && !data.isNull("archives")) {
-            JSONArray archives = data.getJSONArray("archives");
-            if (archives.length() != 0) {
-                for (int i = 0; i < archives.length(); i++) {
-                    JSONObject video = archives.getJSONObject(i);
-                    String title = video.getString("title");
-                    String cover = video.getString("pic");
-                    long aid = video.getLong("aid");
+        JSONObject data = result.optJSONObject("data");
+        if (data == null) return -1;
+        JSONArray medias = data.optJSONArray("medias");
+        if (medias == null) return -1;
+        if (medias.length() == 0) return 1;
 
-                    JSONObject owner = video.getJSONObject("owner");
-                    String upName = owner.getString("name");
+        for (int i = 0; i < medias.length(); i++) {
+            JSONObject media = medias.getJSONObject(i);
+            String title = media.optString("title", "");
+            if (title.isEmpty()) continue;  // 失效稿件
 
-                    JSONObject stat = video.getJSONObject("stat");
-                    String view = StringUtil.toWan(stat.getLong("view")) + "观看";
-                    videoList.add(new VideoCard(title, upName, view, cover, aid, ""));
-                }
-                return 0;
-            } else return 1;
-        } else return -1;
+            String cover = media.optString("cover", "");
+            long aid = media.optLong("id", 0);
+            String bvid = media.optString("bvid", "");
+
+            String upName = "";
+            JSONObject owner = media.optJSONObject("upper");
+            if (owner != null) upName = owner.optString("name", "");
+
+            int play = 0;
+            JSONObject cntInfo = media.optJSONObject("cnt_info");
+            if (cntInfo != null) play = cntInfo.optInt("play", 0);
+
+            String view = StringUtil.toWan(play) + "观看";
+            videoList.add(new VideoCard(title, upName, view, cover, aid, bvid));
+        }
+        return 0;
     }
 
     public static boolean getFavouriteOpus(ArrayList<Opus> list, int page) throws IOException, JSONException {
@@ -162,10 +175,14 @@ public class FavoriteApi {
     }
 
     public static int addFavorite(long aid, long fid) throws IOException, JSONException {
-        String strMid = String.valueOf(SharedPreferencesUtil.getLong("mid", 0));
-        String addFid = fid + strMid.substring(strMid.length() - 2);
-        String url = "https://api.bilibili.com/medialist/gateway/coll/resource/deal";
-        String per = "rid=" + aid + "&type=2&add_media_ids=" + addFid + "&del_media_ids=&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        String url = "https://api.bilibili.com/x/v3/fav/resource/deal";
+        String per = new NetWorkUtil.FormData()
+                .put("rid", aid)
+                .put("type", 2)
+                .put("add_media_ids", fid)
+                .put("del_media_ids", "")
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
 
         JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, NetWorkUtil.webHeaders).body()).string());
         Log.e("debug-添加收藏", result.toString());
@@ -174,10 +191,14 @@ public class FavoriteApi {
 
 
     public static int deleteFavorite(long aid, long fid) throws IOException, JSONException {
-        String strMid = String.valueOf(SharedPreferencesUtil.getLong("mid", 0));
-        String delFid = fid + strMid.substring(strMid.length() - 2);    //腕上哔哩那边是错的，fid后面要加上mid的后两位而不是定值，虽然这不影响什么
-        String url = "https://api.bilibili.com/medialist/gateway/coll/resource/batch/del";
-        String per = "resources=" + aid + ":2&media_id=" + delFid + "&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        String url = "https://api.bilibili.com/x/v3/fav/resource/deal";
+        String per = new NetWorkUtil.FormData()
+                .put("rid", aid)
+                .put("type", 2)
+                .put("add_media_ids", "")
+                .put("del_media_ids", fid)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
 
         JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, NetWorkUtil.webHeaders).body()).string());
         Log.e("debug-删除收藏", result.toString());

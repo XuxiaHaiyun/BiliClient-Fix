@@ -12,56 +12,104 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Objects;
 
 public class LikeCoinFavApi {
 
+    private static ArrayList<String> videoHeaders(long aid) {
+        return NetWorkUtil.webHeadersWithReferer("https://www.bilibili.com/video/av" + aid);
+    }
+
     public static int triple(long aid) throws IOException, JSONException {
         String url = "https://api.bilibili.com/x/web-interface/archive/like/triple";
-        String per = "aid=" + aid + "&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        String per = new NetWorkUtil.FormData()
+                .put("aid", aid)
+                .put("eab_x", 2)
+                .put("ramval", 0)
+                .put("source", "web_normal")
+                .put("ga", 1)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .put("spmid", "333.788.0.0")
+                .put("statistics", "{\"appId\":100,\"platform\":5}")
+                .toString();
 
-        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, NetWorkUtil.webHeaders).body()).string());
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, videoHeaders(aid)).body()).string());
         Log.e("debug-三联", result.toString());
         return result.getInt("code");
     }
 
-    public static int like(long aid, int likeState) throws IOException, JSONException {  //likeState 1点赞0取消
+    /**
+     * 点赞 / 取消点赞
+     *
+     * @param likeState 1：点赞 2：取消赞
+     */
+    public static int like(long aid, int likeState) throws IOException, JSONException {
         String url = "https://api.bilibili.com/x/web-interface/archive/like";
-        String per = "aid=" + aid + "&like=" + likeState + "&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        String per = new NetWorkUtil.FormData()
+                .put("aid", aid)
+                .put("like", likeState)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
 
-        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, NetWorkUtil.webHeaders).body()).string());
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, videoHeaders(aid)).body()).string());
         Log.e("debug-点赞", result.toString());
         return result.getInt("code");
     }
 
     public static int coin(long aid, int multiply) throws IOException, JSONException {
-        String url = "https://api.bilibili.com/x/web-interface/coin/add";
-        String per = "aid=" + aid + "&multiply=" + multiply + "&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        return coin(aid, multiply, 0);
+    }
 
-        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, NetWorkUtil.webHeaders).body()).string());
+    /**
+     * 投币
+     *
+     * @param multiply   投币数量，上限2
+     * @param selectLike 是否同时点赞 0：否 1：是
+     */
+    public static int coin(long aid, int multiply, int selectLike) throws IOException, JSONException {
+        String url = "https://api.bilibili.com/x/web-interface/coin/add";
+        String per = new NetWorkUtil.FormData()
+                .put("aid", aid)
+                .put("multiply", multiply)
+                .put("select_like", selectLike)
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
+
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, videoHeaders(aid)).body()).string());
         Log.e("debug-投币", result.toString());
         return result.getInt("code");
     }
 
+    /**
+     * 收藏视频
+     *
+     * @param fid 收藏夹 media_id（即 fid 本身，v3 接口不需要拼接 mid 后缀）
+     */
     public static int favorite(long aid, long fid) throws IOException, JSONException {
-        String strMid = String.valueOf(SharedPreferencesUtil.getLong("mid", 0));
-        String addFid = fid + strMid.substring(strMid.length() - 2);
-        String url = "https://api.bilibili.com/medialist/gateway/coll/resource/deal";
-        String per = "rid=" + aid + "&type=2&add_media_ids=" + addFid + "&del_media_ids=&csrf=" + SharedPreferencesUtil.getString("csrf", "");
+        String url = "https://api.bilibili.com/x/v3/fav/resource/deal";
+        String per = new NetWorkUtil.FormData()
+                .put("rid", aid)
+                .put("type", 2)
+                .put("add_media_ids", fid)
+                .put("del_media_ids", "")
+                .put("csrf", SharedPreferencesUtil.getString(SharedPreferencesUtil.csrf, ""))
+                .toString();
 
-        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, NetWorkUtil.webHeaders).body()).string());
+        JSONObject result = new JSONObject(Objects.requireNonNull(NetWorkUtil.post(url, per, videoHeaders(aid)).body()).string());
         Log.e("debug-添加收藏", result.toString());
         return result.getInt("code");
     }
 
     public static ApiResult getVideoStats(VideoInfo videoInfo) {
         ApiResult apiResult = new ApiResult();
-        if (SharedPreferencesUtil.getLong("mid", 0) == 0) return apiResult;
+        if (SharedPreferencesUtil.getLong(SharedPreferencesUtil.mid, 0) == 0) return apiResult;
         try {
             String url = "https://api.bilibili.com/x/web-interface/archive/relation?aid=" + videoInfo.aid;
             JSONObject result = NetWorkUtil.getJson(url);
             apiResult.fromJson(result);
-            JSONObject data = result.getJSONObject("data");
+            JSONObject data = result.optJSONObject("data");
+            if (data == null) return apiResult;
             videoInfo.stats.followed = data.optBoolean("attention");
             videoInfo.stats.liked = data.optBoolean("like");
             videoInfo.stats.disliked = data.optBoolean("dislik");

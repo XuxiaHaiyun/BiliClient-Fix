@@ -1,11 +1,13 @@
 package com.RobinNotBad.BiliClient.util;
 
+import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.util.Pair;
 
+import com.RobinNotBad.BiliClient.BiliTerminal;
 import com.RobinNotBad.BiliClient.activity.search.SearchActivity;
 import com.RobinNotBad.BiliClient.activity.user.info.UserInfoActivity;
 
@@ -13,6 +15,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
 import java.util.regex.Matcher;
@@ -29,8 +32,8 @@ public class LinkUrlUtil {
     public static final int TYPE_CVID = 3;
     public static final int TYPE_UID = 4;
     public static final Pattern BV_PATTERN = Pattern.compile("BV[A-Za-z0-9]{10}");
-    public static final Pattern AV_PATTERN = Pattern.compile("av\\d{1,10}");
-    public static final Pattern CV_PATTERN = Pattern.compile("cv\\d{1,10}");
+    public static final Pattern AV_PATTERN = Pattern.compile("av\\d{1,20}");
+    public static final Pattern CV_PATTERN = Pattern.compile("cv\\d{1,20}");
     public static final Pattern UID_PATTERN = Pattern.compile("^(?i)uid\\d+$");
 
     public static void handleWebURL(Context context, String text) {
@@ -123,13 +126,16 @@ public class LinkUrlUtil {
             try {
                 Response response = NetWorkUtil.get(url, NetWorkUtil.webHeaders, location -> handleWebURL(context, location));
                 ResponseBody body;
+                Logu.e("short-url", "code=" + response.code() + " location=" + response.header("Location"));
                 if (response.code() == 200 && (body = response.body()) != null) {
                     JSONObject json = new JSONObject(body.string());
                     if (json.has("code") && json.getInt("code") == -404) {
                         MsgUtil.showMsg("啥都木有~");
                     }
                 }
-            } catch (IOException | JSONException e) {
+            } catch (Throwable e) {
+                Logu.e("short-url-err", e.toString());
+                e.printStackTrace();
                 MsgUtil.showMsg("解析失败！");
             }
         });

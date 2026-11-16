@@ -15,7 +15,6 @@ import com.RobinNotBad.BiliClient.activity.base.BaseActivity;
 import com.RobinNotBad.BiliClient.activity.reply.ReplyFragment;
 import com.RobinNotBad.BiliClient.adapter.viewpager.ViewPagerFragmentAdapter;
 import com.RobinNotBad.BiliClient.event.ReplyEvent;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 import com.RobinNotBad.BiliClient.util.AnimationUtils;
 import com.RobinNotBad.BiliClient.util.CenterThreadPool;
 import com.RobinNotBad.BiliClient.util.Logu;
@@ -88,9 +87,6 @@ public class VideoInfoActivity extends BaseActivity {
     }
 
     protected void initVideoInfoView() {
-        TutorialHelper.showTutorialList(this, R.array.tutorial_video, 1);
-        TutorialHelper.showPagerTutorial(this, 3);
-
         setPageName("视频详情");
         TerminalContext.getInstance().getVideoInfoByAidOrBvId(aid, bvid).observe(this, (result) -> result.onSuccess((videoInfo) -> {
             aid = videoInfo.aid;

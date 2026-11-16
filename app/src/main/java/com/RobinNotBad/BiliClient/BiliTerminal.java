@@ -81,16 +81,13 @@ public class BiliTerminal extends Application {
                 });
             }
 
-            // 启动时检查应用更新（根据auto_check_update_enable设置）
-            if (SharedPreferencesUtil.getBoolean(SharedPreferencesUtil.AUTO_CHECK_UPDATE_ENABLE, true)) {
-                CenterThreadPool.run(() -> {
-                    try {
-                        AppInfoApi.check(context);
-                    } catch (Exception e) {
-                        Logu.e("AppInfoApi.check: 检查更新失败 - " + e.getMessage());
-                    }
-                });
-            }
+            CenterThreadPool.run(() -> {
+                try {
+                    AppInfoApi.check(context);
+                } catch (Exception e) {
+                    Logu.e("AppInfoApi.check: 启动检查失败 - " + e.getMessage());
+                }
+            });
         }
     }
 

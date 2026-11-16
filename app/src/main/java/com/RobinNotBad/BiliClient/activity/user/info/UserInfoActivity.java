@@ -13,7 +13,6 @@ import com.RobinNotBad.BiliClient.R;
 import com.RobinNotBad.BiliClient.activity.base.BaseActivity;
 import com.RobinNotBad.BiliClient.adapter.dynamic.DynamicHolder;
 import com.RobinNotBad.BiliClient.adapter.viewpager.ViewPagerFragmentAdapter;
-import com.RobinNotBad.BiliClient.helper.TutorialHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,8 +35,6 @@ public class UserInfoActivity extends BaseActivity {
 
         setPageName("用户信息");
 
-        TutorialHelper.showTutorialList(this, R.array.tutorial_space, 2);
-
         ViewPager viewPager = findViewById(R.id.viewPager);
 
         List<Fragment> fragmentList = new ArrayList<>();
@@ -56,8 +53,6 @@ public class UserInfoActivity extends BaseActivity {
         viewPager.setAdapter(vpfAdapter);  //没啥好说的，教科书式的ViewPager使用方法
 
         findViewById(R.id.loading).setVisibility(View.GONE);
-
-        TutorialHelper.showPagerTutorial(this, 3);
 
     }
 

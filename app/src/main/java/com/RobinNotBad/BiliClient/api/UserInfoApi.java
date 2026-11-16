@@ -14,12 +14,16 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.IOException;
+import java.net.URLEncoder;
 import java.util.List;
 import java.util.Objects;
 
 //用户信息API
 
 public class UserInfoApi {
+
+    //APP端接口所需的统计参数
+    private static final String STATISTICS_APP = "{\"appId\":1,\"platform\":3,\"version\":\"8.43.0\",\"abtest\":\"\"}";
 
     public static UserInfo getUserInfo(long mid) throws IOException, JSONException {
         String url = "https://api.bilibili.com/x/web-interface/card?mid=" + mid;
@@ -140,60 +144,90 @@ public class UserInfoApi {
 
 
     public static int getUserVideos(long mid, int page, String searchKeyword, List<VideoCard> videoList) throws IOException, JSONException {
+        //使用 web WBI 接口：app 端 /x/v2/space/archive/cursor 已失效（固定返回 -400），
+        //web 端配合 WBI 签名与 dm_img 参数在未登录下可正常返回他人稿件列表。
         String url = "https://api.bilibili.com/x/space/wbi/arc/search?";
-        url += "keyword=" + searchKeyword + "&mid=" + mid + "&order_avoided=true&order=pubdate&pn=" + page
-                + "&ps=40&tid=0&web_location=333.999";
-        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(DmImgParamUtil.getDmImgParamsUrl(url)));
+        url += "mid=" + mid
+                + "&ps=30&tid=0&pn=" + page
+                + "&keyword=" + URLEncoder.encode(searchKeyword == null ? "" : searchKeyword, "UTF-8")
+                + "&order=pubdate"
+                + "&platform=web"
+                + "&web_location=333.1387"
+                + "&order_avoided=true";
+        url = ConfInfoApi.signWBI(DmImgParamUtil.getDmImgParamsUrl(url));
+        JSONObject all = NetWorkUtil.getJson(url,
+                NetWorkUtil.webHeadersWithRefererAndOrigin("https://space.bilibili.com/" + mid, "https://space.bilibili.com"));
         if (all.has("data") && !all.isNull("data")) {
             JSONObject data = all.getJSONObject("data");
-            JSONObject list = data.getJSONObject("list");
-            if (list.has("vlist") && !list.isNull("vlist")) {
-                JSONArray vlist = list.getJSONArray("vlist");
-                if (vlist.length() == 0) return 1;
-                for (int i = 0; i < vlist.length(); i++) {
-                    JSONObject card = vlist.getJSONObject(i);
-                    String cover = card.getString("pic");
-                    long play = card.getLong("play");
-                    String playStr = StringUtil.toWan(play) + "观看";
-                    long aid = card.getLong("aid");
-                    String bvid = card.getString("bvid");
-                    String upName = card.getString("author");
-                    String title = card.getString("title");
+            JSONObject listObj = data.optJSONObject("list");
+            if (listObj == null) return -1;
+            JSONArray list = listObj.optJSONArray("vlist");
+            if (list == null) return -1;
+            if (list.length() == 0) return 1;
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject card = list.getJSONObject(i);
+                String cover = card.optString("pic");
+                long play = card.optLong("play");
+                String playStr = StringUtil.toWan(play) + "观看";
+                long aid = card.optLong("aid");
+                String bvid = card.optString("bvid");
+                String upName = card.optString("author");
+                String title = card.optString("title");
 
-                    videoList.add(new VideoCard(title, upName, playStr, cover, aid, bvid));
-                }
-                return 0;
-            } else return -1;
+                videoList.add(new VideoCard(title, upName, playStr, cover, aid, bvid));
+            }
+            return 0;
         } else return -1;
     }
 
 
     public static int getUserArticles(long mid, int page, List<ArticleCard> articleList) throws IOException, JSONException {
-        String url = "https://api.bilibili.com/x/space/wbi/article?";
-        url += "mid=" + mid + "&order_avoided=true&order=pubdate&pn=" + page
-                + "&ps=30&tid=0";
-        JSONObject all = NetWorkUtil.getJson(ConfInfoApi.signWBI(url), NetWorkUtil.webHeaders);
+        //使用APP端接口，避免未登录时被风控拦截
+        String url = "https://app.bilibili.com/x/v2/space/article?";
+        url += "build=8430300&channel=master&version=8.43.0&c_locale=zh_CN&mobi_app=android&platform=android"
+                + "&pn=" + page + "&ps=10&s_locale=zh_CN"
+                + "&statistics=" + URLEncoder.encode(STATISTICS_APP, "UTF-8")
+                + "&vmid=" + mid;
+        JSONObject all = NetWorkUtil.getJson(url, NetWorkUtil.appHeaders);
         if (all.has("data") && !all.isNull("data")) {
             JSONObject data = all.getJSONObject("data");
-            if (data.has("articles")) {
-                JSONArray list = data.getJSONArray("articles");
-                if (list.length() == 0) return 1;
-                for (int i = 0; i < list.length(); i++) {
-                    JSONObject card = list.getJSONObject(i);
+            JSONArray list = data.optJSONArray("item");
+            if (list == null) return -1;
+            if (list.length() == 0) return 1;
+            for (int i = 0; i < list.length(); i++) {
+                JSONObject card = list.getJSONObject(i);
 
-                    ArticleCard articleCard = new ArticleCard();
-                    articleCard.id = card.getLong("id");
-                    articleCard.title = card.getString("title");
-                    JSONObject stats = card.getJSONObject("stats");
-                    articleCard.view = StringUtil.toWan(stats.getInt("view")) + "阅读";
-                    articleCard.cover = card.getString("banner_url");
-                    JSONObject author = card.getJSONObject("author");
-                    articleCard.upName = author.getString("name");
-                    articleList.add(articleCard);
-                }
-                return 0;
-            } else return 1;
+                ArticleCard articleCard = new ArticleCard();
+                articleCard.id = getArticleId(card);
+                articleCard.title = card.optString("title");
+                JSONObject stats = card.optJSONObject("stats");
+                articleCard.view = stats != null ? StringUtil.toWan(stats.optInt("view")) + "阅读" : "";
+                JSONArray images = card.optJSONArray("origin_image_urls");
+                articleCard.cover = (images != null && images.length() > 0) ? images.optString(0) : "";
+                JSONObject author = card.optJSONObject("author");
+                articleCard.upName = author != null ? author.optString("name") : "";
+                articleList.add(articleCard);
+            }
+            return 0;
         } else return -1;
+    }
+
+    //APP端专栏列表只返回uri（bilibili://article/xxxxx），需要从中取出专栏id
+    private static long getArticleId(JSONObject card) {
+        long id = card.optLong("id");
+        if (id != 0) return id;
+        String uri = card.optString("uri");
+        int index = uri.indexOf("article/");
+        if (index == -1) return 0;
+        String rest = uri.substring(index + "article/".length());
+        int end = 0;
+        while (end < rest.length() && Character.isDigit(rest.charAt(end))) end++;
+        if (end == 0) return 0;
+        try {
+            return Long.parseLong(rest.substring(0, end));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     public static int followUser(long mid, boolean isFollow) throws IOException, JSONException {

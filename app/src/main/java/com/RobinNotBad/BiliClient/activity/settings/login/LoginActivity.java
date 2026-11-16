@@ -10,8 +10,6 @@ import androidx.viewpager.widget.ViewPager;
 import com.RobinNotBad.BiliClient.R;
 import com.RobinNotBad.BiliClient.activity.base.BaseActivity;
 import com.RobinNotBad.BiliClient.adapter.viewpager.ViewPagerFragmentAdapter;
-import com.RobinNotBad.BiliClient.util.MsgUtil;
-import com.RobinNotBad.BiliClient.util.SharedPreferencesUtil;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,6 +17,9 @@ import java.util.List;
 //登录页面，参考了腕上哔哩和WearBili的代码
 
 public class LoginActivity extends BaseActivity {
+
+    private ViewPager viewPager;
+    private PasswordLoginFragment passwordLoginFragment;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,19 +37,35 @@ public class LoginActivity extends BaseActivity {
         }
          */
 
-        ViewPager viewPager = findViewById(R.id.viewPager);
+        viewPager = findViewById(R.id.viewPager);
+        passwordLoginFragment = PasswordLoginFragment.newInstance();
+
         List<Fragment> fragmentList = new ArrayList<>();
         fragmentList.add(QRLoginFragment.newInstance(from_setup));
+        fragmentList.add(passwordLoginFragment);
 
         viewPager.setOffscreenPageLimit(fragmentList.size());
         ViewPagerFragmentAdapter vpfAdapter = new ViewPagerFragmentAdapter(getSupportFragmentManager(), fragmentList);
         viewPager.setAdapter(vpfAdapter);
 
         findViewById(R.id.loading).setVisibility(View.GONE);
-        if (fragmentList.size() > 1 && SharedPreferencesUtil.getBoolean("first_" + LoginActivity.class.getSimpleName(), true)) {
-            MsgUtil.showMsgLong("提示：本页面可以左右滑动");
-            SharedPreferencesUtil.putBoolean("first_" + LoginActivity.class.getSimpleName(), false);
-        }
+    }
+
+    /**
+     * 从扫码页切换到密码 / 短信登录页
+     *
+     * @param smsMode true 显示短信登录，false 显示密码登录
+     */
+    public void switchToPasswordLogin(boolean smsMode) {
+        if (viewPager != null) viewPager.setCurrentItem(1, true);
+        if (passwordLoginFragment != null) passwordLoginFragment.setMode(smsMode);
+    }
+
+    /**
+     * 从密码页返回扫码登录页
+     */
+    public void switchToQrLogin() {
+        if (viewPager != null) viewPager.setCurrentItem(0, true);
     }
 
     @Override

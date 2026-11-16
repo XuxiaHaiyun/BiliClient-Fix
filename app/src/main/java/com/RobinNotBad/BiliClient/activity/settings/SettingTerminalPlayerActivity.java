@@ -44,8 +44,10 @@ public class SettingTerminalPlayerActivity extends RefreshListActivity {
                         getString(R.string.desc_display),
                         String.valueOf(Build.VERSION.SDK_INT < 26),
                         new String[]{"TextureView", "SurfaceView"}));
+                // 默认改为软件解码：老版本 ijkplayer so 的硬解路径(MediaCodec 选择器回调)
+                // 在部分新系统(如 Android 15)上会触发 native SIGILL 崩溃，软解兼容性最好。
                 add(new SettingSection("choose", "解码方式", "player_codec",
-                        getString(R.string.desc_videocodec), "true",
+                        getString(R.string.desc_videocodec), "false",
                         new String[]{"硬件解码", "软件解码"}));
                 add(new SettingSection("choose", "音频输出", "player_audio",
                         getString(R.string.desc_audiocodec), "false",

@@ -22,6 +22,7 @@ import com.RobinNotBad.BiliClient.model.Subtitle;
 import com.RobinNotBad.BiliClient.model.SubtitleLink;
 import com.RobinNotBad.BiliClient.model.VideoInfo;
 import com.RobinNotBad.BiliClient.service.DownloadService;
+import com.RobinNotBad.BiliClient.util.DmImgParamUtil;
 import com.RobinNotBad.BiliClient.util.FileUtil;
 import com.RobinNotBad.BiliClient.util.Logu;
 import com.RobinNotBad.BiliClient.util.NetWorkUtil;
@@ -110,19 +111,26 @@ public class PlayerApi {
                 + "avid=" + playerData.aid
                 + "&cid=" + playerData.cid
                 + "&qn=" + playerData.qn
-                + "&fnval=16&fnver=0" // 16:DASH格式
-                + "&platform=pc"
+                + "&fnval=4048&fnver=0&fourk=1" // 4048: DASH+8K+4K+HDR+杜比+AV1+立体声
                 + "&voice_balance=1"
+                + "&try_look=1" // 未登录尝试查看1080P
+                + "&web_location=1315873"
                 + "&gaia_source=pre-load"
                 + "&isGaiaAvoided=true";
+        url = DmImgParamUtil.getDmImgParamsUrl(url);
 
         url = ConfInfoApi.signWBI(url);
 
         JSONObject body = NetWorkUtil.getJson(url, NetWorkUtil.webHeaders);
+        if (body.optInt("code", -1) != 0 || body.isNull("data")) {
+            Logu.e("playurl", "获取视频流失败: " + body.optString("message"));
+            getVideo(playerData, true);
+            return;
+        }
         JSONObject data = body.getJSONObject("data");
 
         // 解析DASH数据
-        if (data.has("dash")) {
+        if (data.has("dash") && !data.isNull("dash")) {
             JSONObject dashJson = data.getJSONObject("dash");
             playerData.dashData = DashData.fromJson(dashJson);
 
@@ -151,18 +159,20 @@ public class PlayerApi {
         }
         Logu.d("history", playerData.progress + "," + playerData.cidHistory);
 
-        JSONArray accept_description = data.getJSONArray("accept_description");
-        JSONArray accept_quality = data.getJSONArray("accept_quality");
-        String[] qnStrList = new String[accept_description.length()];
-        int[] qnValueList = new int[accept_description.length()];
-        for (int i = 0; i < qnStrList.length; i++) {
-            qnStrList[i] = accept_description.optString(i);
-            qnValueList[i] = accept_quality.optInt(i);
+        JSONArray accept_description = data.optJSONArray("accept_description");
+        JSONArray accept_quality = data.optJSONArray("accept_quality");
+        if (accept_description != null && accept_quality != null) {
+            String[] qnStrList = new String[accept_description.length()];
+            int[] qnValueList = new int[accept_quality.length()];
+            for (int i = 0; i < qnStrList.length; i++) {
+                qnStrList[i] = accept_description.optString(i);
+                qnValueList[i] = accept_quality.optInt(i);
+            }
+            Logu.d("qn_str", Arrays.toString(qnStrList));
+            Logu.d("qn_val", Arrays.toString(qnValueList));
+            playerData.qnStrList = qnStrList;
+            playerData.qnValueList = qnValueList;
         }
-        Logu.d("qn_str", Arrays.toString(qnStrList));
-        Logu.d("qn_val", Arrays.toString(qnValueList));
-        playerData.qnStrList = qnStrList;
-        playerData.qnValueList = qnValueList;
     }
 
     /**
@@ -186,17 +196,23 @@ public class PlayerApi {
         String url = "https://api.bilibili.com/x/player/wbi/playurl?"
                 + "avid=" + playerData.aid
                 + "&cid=" + playerData.cid
-                + (html5 ? "&high_quality=1" : "")
+                + (html5 ? "&platform=html5&high_quality=1" : "")
                 + "&qn=" + playerData.qn
                 + "&fnval=1&fnver=0"
-                + "&platform=" + (html5 ? "html5" : "pc")
                 + "&voice_balance=1"
+                + "&fourk=1"
+                + "&try_look=1"
+                + "&web_location=1315873"
                 + "&gaia_source=pre-load"
                 + "&isGaiaAvoided=true";
+        url = DmImgParamUtil.getDmImgParamsUrl(url);
 
         url = ConfInfoApi.signWBI(url);
 
         JSONObject body = NetWorkUtil.getJson(url, NetWorkUtil.webHeaders);
+        if (body.optInt("code", -1) != 0 || body.isNull("data")) {
+            throw new IOException("获取视频流失败: " + body.optString("message"));
+        }
         JSONObject data = body.getJSONObject("data");
         JSONArray durl = data.getJSONArray("durl");
         JSONObject video_url = durl.getJSONObject(0);
@@ -233,39 +249,108 @@ public class PlayerApi {
     public static void getBangumi(PlayerData playerData) throws JSONException, IOException {
         NetWorkUtil.FormData reqData = new NetWorkUtil.FormData()
                 .setUrlParam(true)
-                .put("aid", playerData.aid)
+                .put("ep_id", playerData.epid)
                 .put("cid", playerData.cid)
-                .put("fnval", 1)
-                .put("fnvar", 0)
                 .put("qn", playerData.qn)
+                .put("fnval", 4048)
+                .put("fnver", 0)
+                .put("fourk", 1)
+                .put("voice_balance", 0)
+                .put("gaia_source", "pre-load")
+                .put("isGaiaAvoided", "true")
+                .put("web_location", 1315873)
+                .put("biz_type", "ogv")
+                .put("scene", "normal")
+                .put("from_client", "BROWSER")
+                .put("drm_tech_type", 0)
+                .put("app_id", 100)
+                .put("try_look", 1);
+
+        String url = "https://api.bilibili.com/ogv/player/playview" + reqData.toString();
+        url = DmImgParamUtil.getDmImgParamsUrl(url);
+        url = ConfInfoApi.signWBI(url);
+
+        JSONObject body = NetWorkUtil.getJson(url, NetWorkUtil.webHeaders);
+        if (body.optInt("code", -1) == 0 && !body.isNull("data")) {
+            JSONObject result = body.getJSONObject("data");
+            JSONObject videoInfo = result.optJSONObject("video_info");
+            JSONObject arc = result.optJSONObject("arc");
+            boolean drm = arc != null && arc.optBoolean("is_drm", false);
+            if (videoInfo != null && !drm) {
+                analyzeBangumiResult(playerData, videoInfo);
+                return;
+            }
+            Logu.e("playurl-ogv", "ogv playview 不可用(DRM=" + drm + ")，回退 pgc 接口");
+        } else {
+            Logu.e("playurl-ogv", "ogv playview 失败: " + body.optString("message") + "，回退 pgc 接口");
+        }
+        getBangumiPgc(playerData);
+    }
+
+    /**
+     * 旧版番剧解析：/pgc/player/web/v2/playurl（DRM 回退路径）
+     */
+    private static void getBangumiPgc(PlayerData playerData) throws JSONException, IOException {
+        NetWorkUtil.FormData reqData = new NetWorkUtil.FormData()
+                .setUrlParam(true)
+                .put("avid", playerData.aid)
+                .put("cid", playerData.cid)
+                .put("qn", playerData.qn)
+                .put("fnval", 4048)
+                .put("fnver", 0)
+                .put("fourk", 1)
                 .put("season_type", 1)
                 .put("session",
                         ToolsUtil.md5(
                                 String.valueOf(System.currentTimeMillis() - SystemClock.currentThreadTimeMillis())))
                 .put("platform", "pc");
+        if (playerData.epid > 0) reqData.put("ep_id", playerData.epid);
 
-        String url = "https://api.bilibili.com/pgc/player/web/playurl" + reqData.toString();
+        String url = ConfInfoApi.signWBI(
+                "https://api.bilibili.com/pgc/player/web/v2/playurl" + reqData.toString());
 
         JSONObject body = NetWorkUtil.getJson(url);
         Logu.v(body.toString());
+        if (body.optInt("code", -1) != 0 || body.isNull("result")) {
+            throw new IOException("获取番剧流失败: " + body.optString("message"));
+        }
 
-        JSONObject data = body.getJSONObject("result");
-        JSONArray durl = data.getJSONArray("durl");
-        JSONObject video_url = durl.getJSONObject(0);
-        playerData.videoUrl = video_url.getString("url");
+        JSONObject result = body.getJSONObject("result");
+        // v2 将数据放在 result.video_info，兼容 v1 直接放在 result 的情况
+        JSONObject data = result.optJSONObject("video_info") != null
+                ? result.getJSONObject("video_info") : result;
+        analyzeBangumiResult(playerData, data);
+    }
 
+    /**
+     * 从番剧流数据（video_info 或 v1 result）中提取播放地址与清晰度列表
+     */
+    private static void analyzeBangumiResult(PlayerData playerData, JSONObject data) throws JSONException {
         playerData.danmakuUrl = "https://comment.bilibili.com/" + playerData.cid + ".xml";
 
-        JSONArray accept_description = data.getJSONArray("accept_description");
-        JSONArray accept_quality = data.getJSONArray("accept_quality");
-        String[] qnStrList = new String[accept_description.length()];
-        int[] qnValueList = new int[accept_description.length()];
-        for (int i = 0; i < qnStrList.length; i++) {
-            qnStrList[i] = accept_description.optString(i);
-            qnValueList[i] = accept_quality.optInt(i);
+        if (data.has("dash") && !data.isNull("dash")) {
+            playerData.dashData = DashData.fromJson(data.getJSONObject("dash"));
+            DashVideoStream videoStream = playerData.dashData.getVideoStream(playerData.qn);
+            if (videoStream != null) playerData.videoUrl = videoStream.baseUrl;
+            DashAudioStream audioStream = playerData.dashData.getBestAudioStream();
+            if (audioStream != null) playerData.audioUrl = audioStream.baseUrl;
+        } else if (data.optJSONArray("durl") != null) {
+            JSONArray durl = data.getJSONArray("durl");
+            playerData.videoUrl = durl.getJSONObject(0).getString("url");
         }
-        playerData.qnStrList = qnStrList;
-        playerData.qnValueList = qnValueList;
+
+        JSONArray accept_description = data.optJSONArray("accept_description");
+        JSONArray accept_quality = data.optJSONArray("accept_quality");
+        if (accept_description != null && accept_quality != null) {
+            String[] qnStrList = new String[accept_description.length()];
+            int[] qnValueList = new int[accept_quality.length()];
+            for (int i = 0; i < qnStrList.length; i++) {
+                qnStrList[i] = accept_description.optString(i);
+                qnValueList[i] = accept_quality.optInt(i);
+            }
+            playerData.qnStrList = qnStrList;
+            playerData.qnValueList = qnValueList;
+        }
     }
 
     /**
@@ -314,7 +399,7 @@ public class PlayerApi {
                 intent.setClassName(context.getString(R.string.player_package_mtv),
                         "com.xinxiangshicheng.wearbiliplayer.cn.player.PlayerActivity");
                 intent.setAction(Intent.ACTION_VIEW);
-                intent.putExtra("cookie", SharedPreferencesUtil.getString("cookies", ""));
+                intent.putExtra("cookie", NetWorkUtil.getCookieString());
                 intent.putExtra("mode", (playerData.isLocal() ? "2" : "0"));
                 intent.putExtra("url", playerData.videoUrl);
                 intent.putExtra("danmaku", playerData.danmakuUrl);
@@ -333,7 +418,7 @@ public class PlayerApi {
 
                 if (!playerData.isLocal()) {
                     Map<String, String> headers = new HashMap<>();
-                    headers.put("Cookie", SharedPreferencesUtil.getString("cookies", ""));
+                    headers.put("Cookie", NetWorkUtil.getCookieString());
                     headers.put("Referer", "https://www.bilibili.com/");
                     intent.putExtra("cookie", (Serializable) headers);
                     intent.putExtra("agent", NetWorkUtil.USER_AGENT_WEB);
