@@ -9,7 +9,7 @@
 <br>
 
 <div>
-<a href="https://github.com/huanli233/BiliClient/releases"><img src="https://img.shields.io/github/v/release/huanli233/BiliClient?color=76bad9&label=base%20version"></a>
+<a href="https://github.com/xuxiahaiyun/BiliClient/releases"><img src="https://img.shields.io/github/v/release/huanli233/BiliClient?color=76bad9&label=base%20version"></a>
 <a href="https://www.android.com/"><img src="https://img.shields.io/badge/platform-Android-3DDC84.svg" alt="android"></a>
 <a href="https://www.java.com/"><img src="https://img.shields.io/badge/language-Java-007396.svg" alt="java"></a>
 <a href="https://developer.android.com/"><img src="https://img.shields.io/badge/minSdk-14%20%28Android%204.0.4%29-orange.svg" alt="minsdk"></a>
